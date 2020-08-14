@@ -640,13 +640,13 @@ function twentytwenty_get_color_for_area( $area = 'content', $context = 'text' )
 		array(
 			'content'       => array(
 				'text'      => '#000000',
-				'accent'    => '#cd2653',
+				'accent'    => '#64cb84',
 				'secondary' => '#6d6d6d',
 				'borders'   => '#dcd7ca',
 			),
 			'header-footer' => array(
 				'text'      => '#000000',
-				'accent'    => '#cd2653',
+				'accent'    => '#64cb84',
 				'secondary' => '#6d6d6d',
 				'borders'   => '#dcd7ca',
 			),
@@ -754,3 +754,215 @@ function twentytwenty_get_elements_array() {
 	*/
 	return apply_filters( 'twentytwenty_get_elements_array', $elements );
 }
+
+
+function action_user_register( $user_id ) { 
+    // var_dump($user_id);
+    $user = get_userdata($user_id);
+    // var_dump($user);
+    $user_roles = $user->roles;
+    if ( in_array( 'teacher', (array) $user->roles ) || in_array( 'lp_teacher', (array) $user->roles )) {
+        $user->add_role('teacher');
+        $user->add_role('lp_teacher');
+    }
+    // var_dump($user->roles);
+    
+}; 
+add_action( 'user_register', 'action_user_register', 10, 1 ); 
+
+/**
+ * Load Custom Fields
+ */
+function load_custom_fields() {
+	foreach (glob(get_stylesheet_directory() . '/fields/*.php') as $filename)
+	{
+    include_once $filename;
+	}
+}
+add_action( 'admin_init', 'load_custom_fields' );
+
+function ecubes_remove_menu_pages() {
+	remove_menu_page('thim-dashboard');
+}
+add_action( 'admin_init', 'ecubes_remove_menu_pages' );
+
+function assign_order_class( $post_id ) {
+	global $wpdb;
+	$post_type = get_post_type($post_id);
+	if($post_type == 'lp_order'){
+		$order_class = get_field( "order_class", $post_id );
+
+		$student_table = $wpdb->prefix . "wpsp_student";
+		
+		$wpsp_students = $wpdb->get_results("SELECT * FROM $student_table WHERE class_id LIKE '%\"" . $order_class . "\"%'");
+		$students = array();
+		foreach ($wpsp_students as $wpsp_student){
+			$id = intval($wpsp_student->wp_usr_id);
+			$students[] = $id;
+		}
+		$serialized_students = serialize($students);
+		// Assign Users to Order
+		update_post_meta($post_id, '_user_id', $students);
+	
+		$items_table = $wpdb->prefix . "learnpress_order_items";
+		$items = $wpdb->get_results("SELECT * FROM `" . $wpdb->prefix . "learnpress_order_items` t1 JOIN `" . $wpdb->prefix . "learnpress_order_itemmeta` t2 WHERE t1.order_item_id = t2.`learnpress_order_item_id` AND t1.order_id = " . $post_id . " AND t2.meta_key = '_course_id'");
+		$courses = array();
+		$t = time();
+		foreach ($students as $student_id) {
+			// $user_courses = get_user_meta($student_id, 'orders');
+			$user_courses = array();
+			foreach ($items as $item){
+				$course_id = intval($item->meta_value);
+				$user_courses[$course_id] = $post_id;
+				$wpdb->get_results("DELETE FROM `" . $wpdb->prefix . "learnpress_user_items` WHERE `user_id` = '$student_id' AND `item_id` = '$course_id' AND `ref_id` = '$post_id'");
+				$wpdb->get_results("INSERT INTO `" . $wpdb->prefix . "learnpress_user_items` (`user_item_id`, `user_id`, `item_id`, `start_time`, `start_time_gmt`, `end_time`, `end_time_gmt`, `item_type`, `status`, `ref_id`, `ref_type`, `parent_id`) VALUES (NULL, '$student_id', '$course_id', '" . date("Y-m-d H:i:s",$t) . "', '" . date("Y-m-d H:i:s",$t) . "', '0000-00-00 00:00:00.000000', '0000-00-00 00:00:00.000000', 'lp_course', 'enrolled', '$post_id', 'lp_order', '0')");
+			}
+			var_dump($student_id, $user_courses);
+			update_user_meta($student_id, 'orders', $user_courses);
+		}
+	}
+
+}
+add_action( 'save_post', 'assign_order_class' );
+
+
+
+if( function_exists('acf_add_local_field_group') ):
+global $wpdb;
+
+// Load WPSchoolPress Subjects
+$subject_table = $wpdb->prefix . "wpsp_subject";
+$class_table = $wpdb->prefix."wpsp_class";
+$wpsp_subjects = $wpdb->get_results("SELECT * FROM $subject_table t1 JOIN $class_table t2 WHERE t1.class_id = t2.cid ORDER BY c_name");
+$subjects = array();
+foreach ($wpsp_subjects as $wpsp_subject){
+	$id = intval($wpsp_subject->id);
+	$subjects[$id] = $wpsp_subject->sub_name . ' - ' . $wpsp_subject->c_name;
+}
+
+// Load WPSchoolPress Classes
+
+$class_table = $wpdb->prefix."wpsp_class";
+$wpsp_classes =$wpdb->get_results("SELECT * FROM $class_table ORDER BY cid DESC");
+$classes = array(
+	0 => 'N/A'
+);
+foreach ($wpsp_classes as $wpsp_class) {
+	$cid=intval($wpsp_class->cid);
+	$classes[$cid] = $wpsp_class->c_name;
+}
+	acf_add_local_field_group(array(
+		'key' => 'group_5f1b5945c2629',
+		'title' => 'WP Information',
+		'fields' => array(
+			array(
+				'key' => 'field_5f1b618b42ab0',
+				'label' => 'WPSubjects',
+				'name' => 'wpsubjects',
+				'type' => 'checkbox',
+				'instructions' => '',
+				'required' => 0,
+				'conditional_logic' => 0,
+				'wrapper' => array(
+					'width' => '',
+					'class' => '',
+					'id' => '',
+				),
+				'choices' => $subjects,
+				'allow_custom' => 0,
+				'default_value' => array(
+				),
+				'layout' => 'vertical',
+				'toggle' => 0,
+				'return_format' => 'value',
+				'save_custom' => 0,
+			),
+			// array(
+			// 	'key' => 'field_5f1b5956f7dda',
+			// 	'label' => 'WPClasses',
+			// 	'name' => 'wpclasses',
+			// 	'type' => 'checkbox',
+			// 	'instructions' => '',
+			// 	'required' => 0,
+			// 	'conditional_logic' => 0,
+			// 	'wrapper' => array(
+			// 		'width' => '',
+			// 		'class' => '',
+			// 		'id' => '',
+			// 	),
+			// 	'choices' => $classes,
+			// 	'allow_custom' => 0,
+			// 	'default_value' => array(
+			// 	),
+			// 	'layout' => 'vertical',
+			// 	'toggle' => 0,
+			// 	'return_format' => 'value',
+			// 	'save_custom' => 0,
+			// ),
+		),
+		'location' => array(
+			array(
+				array(
+					'param' => 'post_type',
+					'operator' => '==',
+					'value' => 'lp_course',
+				),
+			),
+		),
+		'menu_order' => 0,
+		'position' => 'side',
+		'style' => 'default',
+		'label_placement' => 'top',
+		'instruction_placement' => 'label',
+		'hide_on_screen' => '',
+		'active' => true,
+		'description' => '',
+	));
+	
+	acf_add_local_field_group(array(
+		'key' => 'group_5f2f094163a22',
+		'title' => 'Order Classes',
+		'fields' => array(
+			array(
+				'key' => 'field_5f2f094d7ec96',
+				'label' => 'Order Class',
+				'name' => 'order_class',
+				'type' => 'radio',
+				'instructions' => '',
+				'required' => 0,
+				'conditional_logic' => 0,
+				'wrapper' => array(
+					'width' => '',
+					'class' => '',
+					'id' => '',
+				),
+				'choices' => $classes,
+				'allow_null' => 0,
+				'other_choice' => 0,
+				'default_value' => '',
+				'layout' => 'vertical',
+				'return_format' => 'value',
+				'save_other_choice' => 0,
+			),
+		),
+		'location' => array(
+			array(
+				array(
+					'param' => 'post_type',
+					'operator' => '==',
+					'value' => 'lp_order',
+				),
+			),
+		),
+		'menu_order' => 0,
+		'position' => 'side',
+		'style' => 'default',
+		'label_placement' => 'top',
+		'instruction_placement' => 'label',
+		'hide_on_screen' => '',
+		'active' => true,
+		'description' => '',
+	));
+
+	
+	endif;
